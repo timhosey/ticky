@@ -6,7 +6,7 @@ import os
 import json
 from PyQt6.QtWidgets import (
     QApplication, QLabel, QWidget, QGraphicsOpacityEffect, QMenu, QSystemTrayIcon,
-    QVBoxLayout, QPushButton, QComboBox, QSpinBox, QColorDialog, QCheckBox, QLabel as QtLabel, QHBoxLayout
+    QVBoxLayout, QPushButton, QComboBox, QSpinBox, QColorDialog, QCheckBox, QLabel as QtLabel, QHBoxLayout, QFrame
 )
 from PyQt6.QtCore import Qt, QTimer, QPoint, QPropertyAnimation
 from PyQt6.QtGui import QFont, QMouseEvent, QFontDatabase, QAction, QIcon
@@ -17,14 +17,25 @@ class RssTicker(QWidget):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         # self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setGeometry(100, 100, 800, 50)
-        self.setStyleSheet("background-color: black;")
+        # self.setStyleSheet("background-color: black;")
 
         self.drag_pos = None
         self.dragging = False
         self.feed_urls = []
         self.load_feeds_from_file()
 
-        self.label = QLabel(self)
+        # Add a QFrame to contain the label and apply border/background to it
+        self.frame = QFrame(self)
+        self.frame.setGeometry(self.rect())
+        self.frame.setStyleSheet("background-color: black; border: 2px solid lime;")
+        self.frame.lower()  # make sure it stays behind other widgets
+
+        self.label = QLabel(self.frame)
+        self.overlay_label = QLabel("Ticky", self)
+        self.overlay_label.setFont(QFont("Courier", 12, QFont.Weight.Bold))
+        self.overlay_label.setStyleSheet("color: lime; background-color: transparent;")
+        self.overlay_label.setGeometry(10, 5, 100, 20)
+        self.overlay_label.hide()
         # Attempt to load bundled digital font
         font_path = os.path.join(os.path.dirname(__file__), "fonts", "PressStart2P.ttf")
         font_id = QFontDatabase.addApplicationFont(font_path)
@@ -36,7 +47,7 @@ class RssTicker(QWidget):
             print("Bundled digital font not found or failed to load, falling back to Courier")
             digital_font = QFont("Courier", 20)
         self.label.setFont(digital_font)
-        self.label.setStyleSheet("color: lime; background-color: black; padding: 5px;")
+        self.label.setStyleSheet("color: lime; background-color: transparent; border: none; padding: 0px;")
         self.label.setGeometry(0, 0, 2000, 50)  # super wide, so text can scroll
 
         # Opacity effect and fade-in animation
@@ -60,6 +71,17 @@ class RssTicker(QWidget):
         self.refresh_timer.start(600000)  # refresh every 10 min
 
         self.settings_window = SettingsWindow(self)
+
+        # Load and apply settings.json on startup
+        settings_path = os.path.join(os.path.dirname(__file__), "settings.json")
+        if os.path.exists(settings_path):
+            try:
+                with open(settings_path, 'r') as f:
+                    settings = json.load(f)
+                print("Applying saved settings on startup.")
+                self.apply_settings(settings)
+            except Exception as e:
+                print(f"Error applying settings.json on startup: {e}")
 
         assets_dir = os.path.join(os.path.dirname(__file__), "assets")
         if not os.path.exists(assets_dir):
@@ -150,8 +172,12 @@ class RssTicker(QWidget):
 
     def update_label(self):
         headline_text, _ = self.headlines[self.current_index]
+        frame_padding = 5
         self.label.setText(headline_text)
-        self.x_pos = self.width()
+        self.label.adjustSize()
+        self.label.setGeometry(frame_padding, frame_padding, self.label.width(), self.frame.height() - 2 * frame_padding)
+        self.x_pos = self.frame.width()
+        self.label.move(self.x_pos, frame_padding)
 
         # Fade-in animation
         self.fade_anim.stop()
@@ -162,7 +188,7 @@ class RssTicker(QWidget):
 
     def scroll_text(self):
         self.x_pos -= 2  # pixels per frame
-        self.label.move(self.x_pos, 0)
+        self.label.move(self.x_pos, 5)
 
         if self.x_pos + self.label.width() < 0:
             self.current_index = (self.current_index + 1) % len(self.headlines)
@@ -220,13 +246,28 @@ class RssTicker(QWidget):
             print(f"Applying font: {font_family}, size {settings['font_size']}")
             self.label.setFont(new_font)
 
-        # Build stylesheet
-        label_style = f"color: {settings.get('font_color', '#00FF00')}; background-color: {settings.get('background_color', '#000000')}; padding: 5px;"
+        # Apply window style (background + border) to self.frame
+        window_style = f"background-color: {settings.get('background_color', '#000000')};"
         if settings.get("show_border", False):
-            label_style += f" border: {settings.get('border_thickness', 1)}px solid {settings.get('border_color', '#00FF00')};"
+            window_style += f" border: {settings.get('border_thickness', 1)}px solid {settings.get('border_color', '#00FF00')};"
         else:
-            label_style += " border: none;"
+            window_style += " border: none;"
+        if settings.get("use_rounded_corners", False):
+          window_style += f" border-radius: {settings.get('border_radius', 10)}px;"
+        self.frame.setStyleSheet(window_style)
+
+        # Ensure overlay label stays floating and clean
+        self.overlay_label.setStyleSheet("color: lime; background-color: transparent; border: none;")
+
+        # Apply label style (font color, transparent background, no border or padding)
+        label_style = f"color: {settings.get('font_color', '#00FF00')}; background-color: transparent; border: none; padding: 0px;"
         self.label.setStyleSheet(label_style)
+
+        # Show/hide overlay
+        if settings.get("show_overlay_text", False):
+            self.overlay_label.show()
+        else:
+            self.overlay_label.hide()
 
 class SettingsWindow(QWidget):
     def __init__(self, parent_ticker):
@@ -274,6 +315,16 @@ class SettingsWindow(QWidget):
         self.border_color_button = QPushButton("Choose Border Color")
         self.border_color_button.clicked.connect(self.choose_border_color)
         layout.addWidget(self.border_color_button)
+
+        # Rounded corners
+        self.border_radius_checkbox = QCheckBox("Rounded Corners")
+        layout.addWidget(self.border_radius_checkbox)
+
+        self.border_radius_spin = QSpinBox()
+        self.border_radius_spin.setRange(0, 50)
+        self.border_radius_spin.setValue(10)
+        layout.addWidget(QtLabel("Corner Radius:"))
+        layout.addWidget(self.border_radius_spin)
 
         # Overlay text option
         self.overlay_text_checkbox = QCheckBox('Show "Ticky" Overlay Text')
@@ -338,6 +389,9 @@ class SettingsWindow(QWidget):
             self.border_thickness_spin.setValue(settings.get("border_thickness", 1))
             self.overlay_text_checkbox.setChecked(settings.get("show_overlay_text", False))
 
+            self.border_radius_checkbox.setChecked(settings.get("use_rounded_corners", False))
+            self.border_radius_spin.setValue(settings.get("border_radius", 10))
+
             self.font_color = settings.get("font_color", "#00FF00")
             self.background_color = settings.get("background_color", "#000000")
             self.border_color = settings.get("border_color", "#00FF00")
@@ -355,6 +409,8 @@ class SettingsWindow(QWidget):
             "font_color": self.font_color,
             "background_color": self.background_color,
             "border_color": self.border_color,
+            "use_rounded_corners": self.border_radius_checkbox.isChecked(),
+            "border_radius": self.border_radius_spin.value(),
         }
 
         settings_path = os.path.join(os.path.dirname(__file__), "settings.json")

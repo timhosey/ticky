@@ -3,8 +3,10 @@
   "font_size": 24,
   "show_border": true,
   "border_thickness": 1,
-  "show_overlay_text": false,
+  "show_overlay_text": true,
   "font_color": "#00FF00",
   "background_color": "#000000",
-  "border_color": "#00FF00"
+  "border_color": "#00FF00",
+  "use_rounded_corners": true,
+  "border_radius": 10
 }
